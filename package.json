@@ -7,9 +7,8 @@
     "frontend"
   ],
   "scripts": {
-    "postinstall": "cd frontend && npm install",
     "dev": "npm --prefix frontend run dev",
-    "build": "cd frontend && npm install && npm run build",
+    "build": "npm --prefix frontend run build",
     "preview": "npm --prefix frontend run preview",
     "backend": "python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000"
   }
