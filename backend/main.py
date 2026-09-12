@@ -38,14 +38,14 @@ from schemas import (
     BatchContractGenerateRequest,
     ContractLogResponse,
 )
-from backend.image_processing.multi_variant_pipeline import generate_multi_variants
-from backend.image_processing.classifier import classify_document
-from backend.ocr import get_ocr_engine
-from backend.ocr.consensus_engine import ConsensusEngine
-from backend.extractors import extract_dni_data, extract_ce_data
-from backend.storage.file_manager import save_image_matrix
-from backend.storage.excel_manager import append_record_to_excel, generate_filtered_excel
-from backend.services import (
+from image_processing.multi_variant_pipeline import generate_multi_variants
+from image_processing.classifier import classify_document
+from ocr import get_ocr_engine
+from ocr.consensus_engine import ConsensusEngine
+from extractors import extract_dni_data, extract_ce_data
+from storage.file_manager import save_image_matrix
+from storage.excel_manager import append_record_to_excel, generate_filtered_excel
+from services import (
     ExcelAnalyzer,
     WorkerConsolidator,
     ContractGenerator,
