@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, desc, func
 
-from backend.config import (
+from config import (
     UPLOADS_DIR,
     EXPORTS_DIR,
     CONTRACTS_DIR,
@@ -23,8 +23,8 @@ from backend.config import (
     get_peru_now,
     PERU_TZ,
 )
-from backend.database import init_db, get_db, ScannedRecord, GeneratedContractLog
-from backend.schemas import (
+from database import init_db, get_db, ScannedRecord, GeneratedContractLog
+from schemas import (
     ScanResponse,
     RecordCreate,
     RecordResponse,
