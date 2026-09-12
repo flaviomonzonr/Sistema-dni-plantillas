@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "description": "Sistema de Escaneo de Identidad Peruana y Generación de Contratos",
+  "workspaces": [
+    "frontend"
+  ],
   "scripts": {
+    "postinstall": "cd frontend && npm install",
     "dev": "npm --prefix frontend run dev",
     "build": "cd frontend && npm install && npm run build",
     "preview": "npm --prefix frontend run preview",
