@@ -1,8 +1,17 @@
+import sys
+from pathlib import Path
+
+# Ensure project root is in sys.path
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 import os
 import concurrent.futures
 from datetime import datetime, date, timezone
 from typing import Optional, List
-from pathlib import Path
+import json
+import zipfile
 
 from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +20,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, desc, func
 
-from config import (
+from backend.config import (
     UPLOADS_DIR,
     EXPORTS_DIR,
     CONTRACTS_DIR,
@@ -23,8 +32,8 @@ from config import (
     get_peru_now,
     PERU_TZ,
 )
-from database import init_db, get_db, ScannedRecord, GeneratedContractLog
-from schemas import (
+from backend.database import init_db, get_db, ScannedRecord, GeneratedContractLog
+from backend.schemas import (
     ScanResponse,
     RecordCreate,
     RecordResponse,
@@ -38,14 +47,14 @@ from schemas import (
     BatchContractGenerateRequest,
     ContractLogResponse,
 )
-from image_processing.multi_variant_pipeline import generate_multi_variants
-from image_processing.classifier import classify_document
-from ocr import get_ocr_engine
-from ocr.consensus_engine import ConsensusEngine
-from extractors import extract_dni_data, extract_ce_data
-from storage.file_manager import save_image_matrix
-from storage.excel_manager import append_record_to_excel, generate_filtered_excel
-from services import (
+from backend.image_processing.multi_variant_pipeline import generate_multi_variants
+from backend.image_processing.classifier import classify_document
+from backend.ocr import get_ocr_engine
+from backend.ocr.consensus_engine import ConsensusEngine
+from backend.extractors import extract_dni_data, extract_ce_data
+from backend.storage.file_manager import save_image_matrix
+from backend.storage.excel_manager import append_record_to_excel, generate_filtered_excel
+from backend.services import (
     ExcelAnalyzer,
     WorkerConsolidator,
     ContractGenerator,
@@ -55,8 +64,6 @@ from services import (
 )
 from backend.services.worker_matcher import WorkerMatcher
 from backend.services.learning_service import LearningService
-import json
-import zipfile
 
 
 app = FastAPI(
