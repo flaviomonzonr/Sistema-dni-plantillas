@@ -90,6 +90,21 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 def on_startup():
     init_db()
 
+    import threading
+    import time
+
+    def _delayed_warmup():
+        time.sleep(3)  # deja que el servidor termine de arrancar primero
+        try:
+            from backend.ocr import get_ocr_engine
+            engine = get_ocr_engine()
+            engine.warmup()
+        except Exception:
+            pass
+
+    threading.Thread(target=_delayed_warmup, daemon=True).start()
+
+
 
 
 # Global service instances

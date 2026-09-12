@@ -37,8 +37,15 @@ class RapidOCREngine(BaseOCREngine):
             return False
 
     def warmup(self):
-        """Precalienta el motor RapidOCR cuando haya memoria disponible."""
-        pass
+        """Precalienta el motor RapidOCR ejecutando una inferencia dummy."""
+        try:
+            self._init_ocr()
+            if self._ocr is not None:
+                dummy = np.zeros((100, 300, 3), dtype=np.uint8)
+                self._ocr(dummy)
+        except Exception:
+            pass
+
 
     def extract(self, image: np.ndarray, psm: int = 6) -> OCRResult:
         """
