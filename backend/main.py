@@ -89,19 +89,7 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 @app.on_event("startup")
 def on_startup():
     init_db()
-    # 1. Copia de seguridad automática de protección al iniciar el sistema
-    try:
-        backup_service.create_backup("startup_protection")
-    except Exception as e:
-        print(f"Backup warning: {e}")
 
-    # 2. Precalentar el motor OCR al inicio para eliminar latencia en la primera petición
-    try:
-        engine = get_ocr_engine()
-        if hasattr(engine, "warmup"):
-            engine.warmup()
-    except Exception as e:
-        print(f"OCR Warmup notice: {e}")
 
 
 # Global service instances

@@ -13,36 +13,41 @@ class RapidOCREngine(BaseOCREngine):
 
     def __init__(self):
         self._ocr = None
-        self._init_ocr()
 
     def _init_ocr(self):
+        if self._ocr is not None:
+            return
         try:
+            import os
+            os.environ.setdefault("OMP_NUM_THREADS", "1")
+            os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
             from rapidocr_onnxruntime import RapidOCR
             self._ocr = RapidOCR()
         except Exception as e:
             self._ocr = None
 
     def is_available(self) -> bool:
-        if self._ocr is None:
-            self._init_ocr()
-        return self._ocr is not None
+        if self._ocr is not None:
+            return True
+        try:
+            import importlib.util
+            spec = importlib.util.find_spec("rapidocr_onnxruntime")
+            return spec is not None
+        except Exception:
+            return False
 
     def warmup(self):
-        """Precalienta el motor RapidOCR para inicializar los grafos ONNX y acelerar la primera llamada."""
-        if self.is_available():
-            try:
-                dummy = np.full((64, 256, 3), 255, dtype=np.uint8)
-                cv2.putText(dummy, "WARMUP 1234", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
-                self._ocr(dummy)
-            except Exception:
-                pass
+        """Precalienta el motor RapidOCR cuando haya memoria disponible."""
+        pass
 
     def extract(self, image: np.ndarray, psm: int = 6) -> OCRResult:
         """
         Runs RapidOCR on an image (BGR or Grayscale) and produces structured
         OCRResult with lines, words, confidences, and bounding boxes.
         """
-        if not self.is_available():
+        if self._ocr is None:
+            self._init_ocr()
+        if self._ocr is None:
             return OCRResult(
                 full_text="",
                 lines=[],
