@@ -1,5 +1,7 @@
 import axios from 'axios';
 
+const PRODUCTION_BACKEND_URL = 'https://sistema-dni-plantillas.onrender.com';
+
 export const getApiBaseUrl = () => {
   // 1. Variable de entorno explícita (VITE_API_URL en Render / Vercel)
   if (import.meta.env.VITE_API_URL) {
@@ -13,18 +15,12 @@ export const getApiBaseUrl = () => {
   // 3. En entorno de producción web (Render)
   if (typeof window !== 'undefined' && window.location) {
     const hostname = window.location.hostname;
-    // Si estamos en un Static Site de Render (ej: sistema-dni-plantillas-1.onrender.com)
-    if (hostname.includes('sistema-dni-plantillas-1.onrender.com')) {
-      return 'https://sistema-dni-plantillas.onrender.com';
-    }
-    if (hostname.endsWith('-1.onrender.com')) {
-      return `https://${hostname.replace('-1.onrender.com', '.onrender.com')}`;
-    }
-    if (hostname.includes('onrender.com') && !hostname.includes('sistema-dni-plantillas.')) {
-      return 'https://sistema-dni-plantillas.onrender.com';
+    // Si estamos en un frontend en Render (ej: sistema-dni-plantillas-1.onrender.com)
+    if (hostname.includes('onrender.com')) {
+      return PRODUCTION_BACKEND_URL;
     }
     if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-      return '';
+      return PRODUCTION_BACKEND_URL;
     }
   }
   // 4. Desarrollo local por defecto
