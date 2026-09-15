@@ -1,28 +1,31 @@
 import axios from 'axios';
 
-const PRODUCTION_BACKEND_URL = 'https://sistema-dni-plantillas.onrender.com';
+const CORRECT_RENDER_BACKEND = 'https://sistema-dni-plantillas.onrender.com';
 
 export const getApiBaseUrl = () => {
-  // 1. Variable de entorno explícita (VITE_API_URL en Render / Vercel)
-  if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL.replace(/\/$/, '');
-  }
-  // 2. URL personalizada en localStorage si el usuario la configuró
+  // 1. URL personalizada en localStorage si el usuario la configuró
   if (typeof window !== 'undefined' && window.localStorage) {
     const customUrl = window.localStorage.getItem('API_BASE_URL');
     if (customUrl) return customUrl.replace(/\/$/, '');
   }
+
+  // 2. Variable de entorno explícita (corrigiendo automáticamente si apunta a backend viejo 503)
+  if (import.meta.env.VITE_API_URL) {
+    let envUrl = import.meta.env.VITE_API_URL.replace(/\/$/, '');
+    if (envUrl.includes('sistema-dni-backend.onrender.com')) {
+      return CORRECT_RENDER_BACKEND;
+    }
+    return envUrl;
+  }
+
   // 3. En entorno de producción web (Render)
   if (typeof window !== 'undefined' && window.location) {
     const hostname = window.location.hostname;
-    // Si estamos en un frontend en Render (ej: sistema-dni-plantillas-1.onrender.com)
-    if (hostname.includes('onrender.com')) {
-      return PRODUCTION_BACKEND_URL;
-    }
-    if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-      return PRODUCTION_BACKEND_URL;
+    if (hostname.includes('onrender.com') || (hostname !== 'localhost' && hostname !== '127.0.0.1')) {
+      return CORRECT_RENDER_BACKEND;
     }
   }
+
   // 4. Desarrollo local por defecto
   return 'http://127.0.0.1:8000';
 };
@@ -45,11 +48,48 @@ export const apiClient = axios.create({
   timeout: 120000, // 120 seconds to allow for initial AI model loading and high-res OCR
 });
 
+// Auto-failover interceptor: si falla o da 503, redirige automáticamente a sistema-dni-plantillas.onrender.com
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (
+      (error.message === 'Network Error' || error.response?.status === 503 || error.response?.status === 404) &&
+      apiClient.defaults.baseURL !== CORRECT_RENDER_BACKEND &&
+      typeof window !== 'undefined' &&
+      window.location.hostname.includes('onrender.com')
+    ) {
+      console.warn('Conexión fallida. Cambiando automáticamente al backend saludable:', CORRECT_RENDER_BACKEND);
+      apiClient.defaults.baseURL = CORRECT_RENDER_BACKEND;
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem('API_BASE_URL', CORRECT_RENDER_BACKEND);
+      }
+      const newConfig = { ...error.config, baseURL: CORRECT_RENDER_BACKEND };
+      return axios(newConfig);
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const api = {
   // Check backend health & OCR status
   checkHealth: async () => {
-    const res = await apiClient.get('/api/health');
-    return res.data;
+    try {
+      const res = await apiClient.get('/api/health');
+      return res.data;
+    } catch (err) {
+      // Fallback directo a sistema-dni-plantillas si estamos en Render
+      if (typeof window !== 'undefined' && window.location.hostname.includes('onrender.com')) {
+        try {
+          const directRes = await axios.get(`${CORRECT_RENDER_BACKEND}/api/health`, { timeout: 15000 });
+          apiClient.defaults.baseURL = CORRECT_RENDER_BACKEND;
+          window.localStorage.setItem('API_BASE_URL', CORRECT_RENDER_BACKEND);
+          return directRes.data;
+        } catch (e2) {
+          throw err;
+        }
+      }
+      throw err;
+    }
   },
 
   // Scan front and back of document
@@ -90,130 +130,156 @@ export const api = {
     return res.data;
   },
 
+  // Direct fast DNI scanning (OCR Engine V1)
+  scanDniDirect: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await apiClient.post('/api/v1/scan-dni', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return res.data;
+  },
+
   // Save confirmed record to SQLite and Excel
   saveRecord: async (recordData) => {
     const res = await apiClient.post('/api/records', recordData);
     return res.data;
   },
 
-  // List records with pagination and filters
+  // List scanned records with pagination & filters
   getRecords: async (params = {}) => {
     const res = await apiClient.get('/api/records', { params });
     return res.data;
   },
 
-  // Get summary stats
+  // Get single record details
+  getRecord: async (id) => {
+    const res = await apiClient.get(`/api/records/${id}`);
+    return res.data;
+  },
+
+  // Delete a record
+  deleteRecord: async (id) => {
+    const res = await apiClient.delete(`/api/records/${id}`);
+    return res.data;
+  },
+
+  // Get summary dashboard statistics
   getStats: async () => {
     const res = await apiClient.get('/api/records/stats');
     return res.data;
   },
 
-  // Get single record
-  getRecord: async (recordId) => {
-    const res = await apiClient.get(`/api/records/${recordId}`);
-    return res.data;
+  // Export filtered records to Excel (triggers browser download)
+  getExportUrl: (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    const base = apiClient.defaults.baseURL || API_BASE_URL;
+    return `${base}/api/export-excel${query ? `?${query}` : ''}`;
   },
 
-  // Delete record
-  deleteRecord: async (recordId) => {
-    const res = await apiClient.delete(`/api/records/${recordId}`);
-    return res.data;
-  },
-
-  // Excel download URL helper
-  getExportExcelUrl: (params = {}) => {
-    const query = new URLSearchParams();
-    if (params.search) query.append('search', params.search);
-    if (params.doc_type) query.append('doc_type', params.doc_type);
-    if (params.start_date) query.append('start_date', params.start_date);
-    if (params.end_date) query.append('end_date', params.end_date);
-    return `${API_BASE_URL}/api/export-excel?${query.toString()}`;
-  },
-
-  // Absolute URL for uploads
+  // Get full image URL from relative path returned by backend
   getImageUrl: (path) => {
     if (!path) return '';
     if (path.startsWith('http')) return path;
-    return `${API_BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
+    const base = apiClient.defaults.baseURL || API_BASE_URL;
+    return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
   },
 
-  // ============================================================
-  // Inteligencia de Excel, Consolidación y Generación de Contratos
-  // ============================================================
+  // Technical diagnostic endpoint for testing variants & OCR
+  getOCRDiagnostic: async (file, docType = 'DNI') => {
+    const formData = new FormData();
+    formData.append('image', file);
+    formData.append('doc_type', docType);
 
-  // Search worker in Excel and previous database records
-  searchWorkerByDni: async (dni) => {
+    const res = await apiClient.post('/api/ocr/diagnostic', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return res.data;
+  },
+
+  // Continuous learning stats
+  getLearningStats: async () => {
+    const res = await apiClient.get('/api/ocr/learning-stats');
+    return res.data;
+  },
+
+  // Search worker profile by DNI in Excel & Database
+  searchWorkerProfile: async (dni) => {
     const res = await apiClient.get(`/api/worker/search/${dni}`);
     return res.data;
   },
 
-  // Consolidate OCR scan with Excel data
+  // Consolidate worker data from OCR scan
   consolidateWorker: async (payload) => {
     const res = await apiClient.post('/api/worker/consolidate', payload);
     return res.data;
   },
 
-  // Calculate contract end date automatically
+  // Calculate legal contract dates
   calculateContractDates: async (startDate, durationMonths) => {
     const res = await apiClient.post('/api/contracts/calculate-dates', {
       start_date: startDate,
-      duration_months: Number(durationMonths),
+      duration_months: durationMonths,
     });
     return res.data;
   },
 
-  // Get contract templates
-  getContractTemplates: async () => {
+  // List available contract templates (.docx)
+  listContractTemplates: async () => {
     const res = await apiClient.get('/api/contracts/templates');
     return res.data;
   },
 
-  // Generate single contract (.docx)
+  // Generate single contract .docx
   generateContract: async (payload) => {
     const res = await apiClient.post('/api/contracts/generate', payload);
     return res.data;
   },
 
-  // Generate batch contracts (.docx / .zip)
+  // Generate batch contracts .docx (.zip)
   generateBatchContracts: async (payload) => {
     const res = await apiClient.post('/api/contracts/generate-batch', payload);
     return res.data;
   },
 
-  // Get generated contracts history
+  // Get contract generation history
   getContractsHistory: async (params = {}) => {
     const res = await apiClient.get('/api/contracts/history', { params });
     return res.data;
   },
 
-  // Get contract download URL
+  // Download contract or ZIP file URL
   getContractDownloadUrl: (filename) => {
-    return `${API_BASE_URL}/api/contracts/download/${filename}`;
+    if (!filename) return '';
+    const base = apiClient.defaults.baseURL || API_BASE_URL;
+    return `${base}/api/contracts/download/${filename}`;
   },
 
-  // Get Excel diagnostic inspection
+  // Excel deep diagnostic
   getExcelDiagnostic: async () => {
     const res = await apiClient.get('/api/excel/diagnostic');
     return res.data;
   },
 
-  // List all workers in Excel
-  getExcelWorkers: async () => {
+  // List all Excel workers
+  listExcelWorkers: async () => {
     const res = await apiClient.get('/api/excel/workers');
     return res.data;
   },
 
-  // ============================================================
-  // Plantillas Excel & Llenado Automático de DNI
-  // ============================================================
+  // ==========================================
+  // Excel Templates Management
+  // ==========================================
 
-  // List all registered Excel templates
-  getExcelTemplates: async () => {
+  listExcelTemplates: async () => {
     const res = await apiClient.get('/api/excel-templates');
     return res.data;
   },
 
-  // Upload a new Excel template (.xlsx)
   uploadExcelTemplate: async (file) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -223,7 +289,6 @@ export const api = {
     return res.data;
   },
 
-  // Fill DNI data into an Excel template (single)
   fillExcelTemplate: async (templateName, data, sheetName = null) => {
     const res = await apiClient.post('/api/excel-templates/fill', {
       template_name: templateName,
@@ -233,35 +298,31 @@ export const api = {
     return res.data;
   },
 
-  // Generate batch Excel from selected workers adhering to yellow cells rule
-  generateBatchExcel: async (templateName, recordIds, sheetName = null) => {
+  generateBatchExcel: async (templateName, recordIds = [], records = null, sheetName = null) => {
     const res = await apiClient.post('/api/excel-templates/generate-batch', {
       template_name: templateName,
       record_ids: recordIds,
+      records: records,
       sheet_name: sheetName,
     });
     return res.data;
   },
 
-  // Get list of available scanned dates
   getScannedDates: async () => {
     const res = await apiClient.get('/api/scanned-records/dates');
     return res.data;
   },
 
-  // Filter scanned records by date and time range
-  getRecordsByDateTime: async (params = {}) => {
+  getScannedRecordsByDateTime: async (params = {}) => {
     const res = await apiClient.get('/api/scanned-records/by-date-time', { params });
     return res.data;
   },
 
-  // Delete an Excel template
   deleteExcelTemplate: async (filename) => {
     const res = await apiClient.delete(`/api/excel-templates/${encodeURIComponent(filename)}`);
     return res.data;
   },
 
-  // Rename an Excel template
   renameExcelTemplate: async (filename, newName) => {
     const res = await apiClient.put(`/api/excel-templates/${encodeURIComponent(filename)}/rename`, {
       new_name: newName,
@@ -269,8 +330,7 @@ export const api = {
     return res.data;
   },
 
-  // Save custom column mappings
-  saveExcelTemplateMapping: async (filename, sheetName, mappings) => {
+  saveTemplateMapping: async (filename, sheetName, mappings) => {
     const res = await apiClient.post(`/api/excel-templates/${encodeURIComponent(filename)}/mapping`, {
       sheet_name: sheetName,
       mappings,
@@ -278,131 +338,102 @@ export const api = {
     return res.data;
   },
 
-  // Get original template download URL
   getTemplateDownloadUrl: (filename) => {
-    return `${API_BASE_URL}/api/excel-templates/download/${encodeURIComponent(filename)}`;
+    if (!filename) return '';
+    const base = apiClient.defaults.baseURL || API_BASE_URL;
+    return `${base}/api/excel-templates/download/${encodeURIComponent(filename)}`;
   },
 
-  // Get export file download URL
   getExportDownloadUrl: (filename) => {
-    return `${API_BASE_URL}/api/exports/download/${encodeURIComponent(filename)}`;
+    if (!filename) return '';
+    const base = apiClient.defaults.baseURL || API_BASE_URL;
+    return `${base}/api/exports/download/${encodeURIComponent(filename)}`;
   },
 
-  // Get technical OCR diagnostic for multi-variant inspection
-  getOcrDiagnostic: async (imageFile, docType = 'DNI') => {
+  // ==========================================
+  // Supabase Cloud Templates Management
+  // ==========================================
+
+  getSupabaseConfig: async () => {
+    const res = await apiClient.get('/api/supabase/config');
+    return res.data;
+  },
+
+  saveSupabaseConfig: async (supabaseUrl, supabaseKey, bucketName = 'templates') => {
+    const res = await apiClient.post('/api/supabase/config', {
+      supabase_url: supabaseUrl,
+      supabase_key: supabaseKey,
+      bucket_name: bucketName,
+    });
+    return res.data;
+  },
+
+  testSupabaseConnection: async () => {
+    const res = await apiClient.post('/api/supabase/test-connection');
+    return res.data;
+  },
+
+  listSupabaseTemplates: async () => {
+    const res = await apiClient.get('/api/supabase-templates');
+    return res.data;
+  },
+
+  uploadSupabaseTemplate: async (file, name, templateType = 'EXCEL_CARGA_MASIVA', version = '1.0', userName = 'Flavio Monzón') => {
     const formData = new FormData();
-    formData.append('image', imageFile);
-    formData.append('doc_type', docType);
-    const res = await apiClient.post('/api/ocr/diagnostic', formData, {
+    formData.append('file', file);
+    if (name) formData.append('name', name);
+    formData.append('template_type', templateType);
+    formData.append('version', version);
+    formData.append('user_name', userName);
+
+    const res = await apiClient.post('/api/supabase-templates/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return res.data;
   },
 
-  // Get continuous learning stats
-  getOcrLearningStats: async () => {
-    const res = await apiClient.get('/api/ocr/learning-stats');
+  replaceSupabaseTemplateFile: async (templateId, file, userName = 'Flavio Monzón') => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('user_name', userName);
+
+    const res = await apiClient.post(`/api/supabase-templates/${templateId}/replace`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
     return res.data;
   },
 
-  // ============================================================
-  // Copias de Seguridad y Persistencia de Datos
-  // ============================================================
-  getBackupStatus: async () => {
-    const res = await apiClient.get('/api/backups/status');
+  updateSupabaseTemplateMetadata: async (templateId, payload) => {
+    const res = await apiClient.put(`/api/supabase-templates/${templateId}`, payload);
     return res.data;
   },
 
-  createBackup: async () => {
-    const res = await apiClient.post('/api/backups/create');
+  deleteSupabaseTemplate: async (templateId) => {
+    const res = await apiClient.delete(`/api/supabase-templates/${templateId}`);
     return res.data;
   },
 
-  getDownloadFullBackupZipUrl: () => {
-    return `${API_BASE_URL}/api/backups/download-zip`;
+  saveSupabaseTemplateMapping: async (templateId, sheetName, mappings) => {
+    const res = await apiClient.post(`/api/supabase-templates/${templateId}/mapping`, {
+      sheet_name: sheetName,
+      mappings,
+    });
+    return res.data;
   },
 
-  // ============================================================
-  // Módulo Supabase: Gestión de Plantillas en la Nube
-  // ============================================================
-  supabase: {
-    getConfig: async () => {
-      const res = await apiClient.get('/api/supabase/config');
-      return res.data;
-    },
+  generateBatchExcelSupabase: async (templateId, recordIds = [], records = null, sheetName = null) => {
+    const res = await apiClient.post('/api/supabase-templates/generate-batch', {
+      template_id: templateId,
+      record_ids: recordIds,
+      records: records,
+      sheet_name: sheetName,
+    });
+    return res.data;
+  },
 
-    saveConfig: async (payload) => {
-      const res = await apiClient.post('/api/supabase/config', payload);
-      return res.data;
-    },
-
-    testConnection: async () => {
-      const res = await apiClient.post('/api/supabase/test-connection');
-      return res.data;
-    },
-
-    getTemplates: async () => {
-      const res = await apiClient.get('/api/supabase-templates');
-      return res.data;
-    },
-
-    uploadTemplate: async (file, { name, templateType, version, userName } = {}) => {
-      const formData = new FormData();
-      formData.append('file', file);
-      if (name) formData.append('name', name);
-      if (templateType) formData.append('template_type', templateType);
-      if (version) formData.append('version', version || '1.0');
-      if (userName) formData.append('user_name', userName || 'Flavio Monzón');
-
-      const res = await apiClient.post('/api/supabase-templates/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      return res.data;
-    },
-
-    replaceTemplate: async (templateId, file, userName = 'Flavio Monzón') => {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('user_name', userName);
-
-      const res = await apiClient.post(`/api/supabase-templates/${templateId}/replace`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      return res.data;
-    },
-
-    updateMetadata: async (templateId, data) => {
-      const res = await apiClient.put(`/api/supabase-templates/${templateId}`, data);
-      return res.data;
-    },
-
-    deleteTemplate: async (templateId) => {
-      const res = await apiClient.delete(`/api/supabase-templates/${templateId}`);
-      return res.data;
-    },
-
-    saveMapping: async (templateId, sheetName, mappings) => {
-      const res = await apiClient.post(`/api/supabase-templates/${templateId}/mapping`, {
-        sheet_name: sheetName,
-        mappings,
-      });
-      return res.data;
-    },
-
-    generateBatchExcel: async (templateId, recordIds, sheetName = null) => {
-      const res = await apiClient.post('/api/supabase-templates/generate-batch', {
-        template_id: templateId,
-        record_ids: recordIds,
-        sheet_name: sheetName,
-      });
-      return res.data;
-    },
-
-    getDownloadUrl: (templateId) => {
-      return `${API_BASE_URL}/api/supabase-templates/${templateId}/download`;
-    },
+  getSupabaseTemplateDownloadUrl: (templateId) => {
+    if (!templateId) return '';
+    const base = apiClient.defaults.baseURL || API_BASE_URL;
+    return `${base}/api/supabase-templates/${templateId}/download`;
   },
 };
-
-
-
