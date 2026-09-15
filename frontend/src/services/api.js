@@ -1,6 +1,27 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+const getApiBaseUrl = () => {
+  // 1. Variable de entorno explícita (VITE_API_URL en Render / Vercel)
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL.replace(/\/$/, '');
+  }
+  // 2. URL personalizada en localStorage si el usuario la configuró
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const customUrl = window.localStorage.getItem('API_BASE_URL');
+    if (customUrl) return customUrl.replace(/\/$/, '');
+  }
+  // 3. En entorno de producción web (Render, dominio propio), usar ruta relativa al mismo dominio
+  if (typeof window !== 'undefined' && window.location) {
+    const hostname = window.location.hostname;
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      return '';
+    }
+  }
+  // 4. Desarrollo local por defecto
+  return 'http://127.0.0.1:8000';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,

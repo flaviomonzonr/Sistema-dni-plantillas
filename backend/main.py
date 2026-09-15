@@ -53,6 +53,7 @@ from backend.image_processing.classifier import classify_document
 from backend.ocr import get_ocr_engine
 from backend.ocr.consensus_engine import ConsensusEngine
 from backend.extractors import extract_dni_data, extract_ce_data
+from backend.ocr_engine import extract_dni_from_bytes, process_dni_image
 from backend.storage.file_manager import save_image_matrix
 from backend.storage.excel_manager import append_record_to_excel, generate_filtered_excel
 from backend.services import (
@@ -553,6 +554,108 @@ def scan_and_save_document(
         "scan_data": scan_dict,
     }
 
+
+@app.post("/api/v1/scan-dni")
+async def scan_dni_v1(
+    file: Optional[UploadFile] = File(None),
+    image: Optional[UploadFile] = File(None),
+):
+    """
+    Endpoint directo de extracción de datos de DNI Peruano (DNI 8 dígitos, Nombres y Apellidos)
+    a partir de fotos de celular o archivos subidos, utilizando OpenCV + RapidOCR + Regex
+    sin necesidad de etiquetado manual.
+    """
+    upload_file = file or image
+    if upload_file is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Debe proporcionar un archivo de imagen en el campo 'file' o 'image'."
+        )
+
+    img_bytes = await upload_file.read()
+    if not img_bytes:
+        raise HTTPException(status_code=400, detail="El archivo de imagen proporcionado está vacío.")
+
+    try:
+        data = extract_dni_from_bytes(img_bytes)
+        return {
+            "dni": data.get("dni", ""),
+            "nombres": data.get("nombres", ""),
+            "apellidos": data.get("apellidos", ""),
+            "paterno": data.get("paterno", ""),
+            "materno": data.get("materno", ""),
+            "success": data.get("success", False),
+            "raw_text": data.get("raw_text", ""),
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al procesar la imagen con el motor OCR: {str(e)}"
+        )
+
+
+@app.post("/api/v1/scan-folder")
+def scan_folder_api(
+    folder_path: str = Query("DNIS", description="Ruta de la carpeta dentro del proyecto o absoluta"),
+    recursive: bool = Query(True, description="Buscar imágenes recursivamente en subcarpetas"),
+    limit: Optional[int] = Query(None, description="Límite opcional de imágenes a procesar"),
+):
+    """
+    Escanea en lote una carpeta del proyecto (ej: DNIS, ENTRADA o ruta completa)
+    extrayendo DNI, Nombres y Apellidos de cada imagen con OpenCV + RapidOCR + Regex.
+    """
+    target_dir = Path(folder_path)
+    if not target_dir.is_absolute():
+        target_dir = _PROJECT_ROOT / folder_path
+
+    if not target_dir.exists():
+        raise HTTPException(status_code=404, detail=f"La carpeta '{target_dir}' no existe.")
+
+    valid_extensions = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+    if recursive:
+        image_files = [f for f in target_dir.rglob("*") if f.is_file() and f.suffix.lower() in valid_extensions]
+    else:
+        image_files = [f for f in target_dir.iterdir() if f.is_file() and f.suffix.lower() in valid_extensions]
+
+    image_files.sort(key=lambda x: str(x).lower())
+    if limit and limit > 0:
+        image_files = image_files[:limit]
+
+    results = []
+    for idx, img_path in enumerate(image_files, 1):
+        try:
+            img_bytes = img_path.read_bytes()
+            extracted = extract_dni_from_bytes(img_bytes)
+            results.append({
+                "index": idx,
+                "file_name": img_path.name,
+                "file_path": str(img_path),
+                "dni": extracted.get("dni", ""),
+                "apellidos": extracted.get("apellidos", ""),
+                "nombres": extracted.get("nombres", ""),
+                "paterno": extracted.get("paterno", ""),
+                "materno": extracted.get("materno", ""),
+                "success": extracted.get("success", False),
+            })
+        except Exception as e:
+            results.append({
+                "index": idx,
+                "file_name": img_path.name,
+                "file_path": str(img_path),
+                "error": str(e),
+                "success": False,
+            })
+
+    total_success = sum(1 for r in results if r.get("success"))
+
+    return {
+        "folder": str(target_dir),
+        "total_images": len(image_files),
+        "total_detected": total_success,
+        "results": results,
+    }
 
 
 @app.post("/api/ocr/diagnostic")
@@ -1515,5 +1618,12 @@ def generate_batch_excel_supabase(payload: dict, db: Session = Depends(get_db)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al generar archivo Excel: {str(e)}")
+
+
+# Servir la app React frontend compilada si existe la carpeta dist
+_FRONTEND_DIST = _PROJECT_ROOT / "frontend" / "dist"
+if _FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="frontend_dist")
+
 
 

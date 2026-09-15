@@ -55,6 +55,8 @@ PROCESADOS/*
 !PROCESADOS/.gitkeep
 ERRORES/*
 !ERRORES/.gitkeep
+DNIS/*
+!DNIS/.gitkeep
 contracts_generated/*
 !contracts_generated/.gitkeep
 templates/supabase_cache/
