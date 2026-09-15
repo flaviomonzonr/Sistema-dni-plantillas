@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const getApiBaseUrl = () => {
+export const getApiBaseUrl = () => {
   // 1. Variable de entorno explícita (VITE_API_URL en Render / Vercel)
   if (import.meta.env.VITE_API_URL) {
     return import.meta.env.VITE_API_URL.replace(/\/$/, '');
@@ -10,15 +10,36 @@ const getApiBaseUrl = () => {
     const customUrl = window.localStorage.getItem('API_BASE_URL');
     if (customUrl) return customUrl.replace(/\/$/, '');
   }
-  // 3. En entorno de producción web (Render, dominio propio), usar ruta relativa al mismo dominio
+  // 3. En entorno de producción web (Render)
   if (typeof window !== 'undefined' && window.location) {
     const hostname = window.location.hostname;
+    // Si estamos en un Static Site de Render (ej: sistema-dni-plantillas-1.onrender.com)
+    if (hostname.includes('sistema-dni-plantillas-1.onrender.com')) {
+      return 'https://sistema-dni-plantillas.onrender.com';
+    }
+    if (hostname.endsWith('-1.onrender.com')) {
+      return `https://${hostname.replace('-1.onrender.com', '.onrender.com')}`;
+    }
+    if (hostname.includes('onrender.com') && !hostname.includes('sistema-dni-plantillas.')) {
+      return 'https://sistema-dni-plantillas.onrender.com';
+    }
     if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
       return '';
     }
   }
   // 4. Desarrollo local por defecto
   return 'http://127.0.0.1:8000';
+};
+
+export const setApiBaseUrl = (newUrl) => {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    if (newUrl) {
+      window.localStorage.setItem('API_BASE_URL', newUrl.trim().replace(/\/$/, ''));
+    } else {
+      window.localStorage.removeItem('API_BASE_URL');
+    }
+    window.location.reload();
+  }
 };
 
 const API_BASE_URL = getApiBaseUrl();
